@@ -301,18 +301,68 @@ function renderContenido(unit) {
 // ---------- Sección: Ideas ----------
 
 const MOCK_RECOMMENDATIONS = {
-  "casino-gala": [
-    "Los reels superan ampliamente a los flyers en visualizaciones (595-624 vs. bajo alcance en imágenes fijas) — priorizá formato video para los anuncios de sorteos.",
-    "Los posts publicados el mismo día del sorteo (no antes) muestran mejor engagement que los anuncios previos — considerá adelantar menos la comunicación del resultado.",
-    "\"¡Qué partido, Argentina!\" (contenido futbolero, no directamente de casino) fue el mejor post del mes — el gancho deportivo funciona mejor que el mensaje de marca directo."
-  ],
-  "valentino-restaurant": [
-    "Los carruseles de \"Cena Temática\" acumulan más likes que las piezas de \"Sugerencia del Chef\" — el formato evento/experiencia rinde mejor que el de producto individual.",
-    "Publicar el recap de un evento días después (no el mismo día) sigue generando buen engagement — no hace falta apurar la publicación el día exacto."
-  ],
-  default: [
-    "Todavía no hay suficiente historial de esta unidad para generar recomendaciones específicas — en cuanto se acumulen más publicaciones con datos reales, esta sección se va a ir completando sola."
-  ]
+  "casino-gala": {
+    insights: [
+      "Los reels superan ampliamente a los flyers en visualizaciones (595–624 vs. bajo alcance en imágenes fijas) — el video se lleva la atención.",
+      "\"¡Qué partido, Argentina!\" (gancho futbolero, no un anuncio de marca directo) fue el mejor post del mes — el contenido que conecta con algo que la gente ya está viviendo funciona mejor que el mensaje comercial."
+    ],
+    contentIdeas: [
+      "Reel de la reacción real de un ganador en el momento exacto en que se entera que ganó — cámara en mano, sin guion, buscando la emoción genuina en vez de una recreación prolija.",
+      "Serie \"Así se arma un sorteo\": 15-20 segundos detrás de escena de cómo se preparan los premios en sala antes del evento, para generar expectativa los días previos.",
+      "Aprovechar el folclore del Mundial (como funcionó con la Selección): micro-contenido de \"pronósticos\" o \"quiniela entre jugadores de sala\" que mezcle el clima futbolero con el casino sin vender directamente."
+    ]
+  },
+  "valentino-restaurant": {
+    insights: [
+      "Los carruseles de \"Cena Temática\" acumulan más likes que las piezas de \"Sugerencia del Chef\" — el formato evento/experiencia rinde mejor que mostrar un plato suelto.",
+      "El recap de un evento publicado días después (no el mismo día) sigue generando buen engagement — no hace falta apurar la publicación el día exacto del evento."
+    ],
+    contentIdeas: [
+      "Reel del momento del maridaje en vivo durante una Cena Temática: el sommelier explicando el vino en la mesa, con los comensales de fondo.",
+      "Serie \"De dónde viene\": mini-historia de un ingrediente destacado del menú (ej. la trucha patagónica) antes de mostrar el plato terminado — genera curiosidad antes de la venta.",
+      "Testimonios cortos (10-15 seg) de comensales reales al salir de una cena temática, contando en sus palabras qué les pareció la experiencia."
+    ]
+  },
+  "resto-ruta-11": {
+    insights: [
+      "Todavía no hay suficiente historial de rendimiento acumulado para esta unidad — estas ideas parten de los pilares de contenido definidos, no de datos de performance todavía."
+    ],
+    contentIdeas: [
+      "Reel del cara a cara entre los dos sommeliers del Desafío de Sommelier, mostrando la cata a ciegas en tiempo real — generar expectativa antes de revelar el ganador.",
+      "Serie \"Plato del día\" en formato historia: el chef mostrando el plato recién salido de cocina, sin producción, todos los días a la misma hora.",
+      "Detrás de escena de cocina en hora pico — el ritmo real de un servicio, transmite el volumen y la energía del lugar sin necesidad de un guion armado."
+    ]
+  },
+  "amerian-hotel": {
+    insights: [
+      "Todavía no hay suficiente historial de rendimiento acumulado para esta unidad — estas ideas parten de los pilares de contenido definidos, no de datos de performance todavía."
+    ],
+    contentIdeas: [
+      "Recorrido en un solo plano (walk-through) desde el check-in hasta una habitación, mostrando el trayecto real que hace un huésped — más efectivo que fotos sueltas de cada ambiente.",
+      "Reel \"un día en Amerian\": desayuno, piscina, Valentino, spa, en cortes rápidos con música — pensado para alguien que está decidiendo dónde alojarse en Resistencia.",
+      "Colaboración cruzada con Valentino: mostrar la cena en el restaurante como parte de la experiencia de hospedaje, no como una pieza separada."
+    ]
+  },
+  "gala-hotel-convenciones": {
+    insights: [
+      "Todavía no hay suficiente historial de rendimiento acumulado para esta unidad — estas ideas parten de los pilares de contenido definidos, no de datos de performance todavía."
+    ],
+    contentIdeas: [
+      "Time-lapse del montaje de un salón, desde vacío hasta listo para el evento — el \"antes y después\" suele funcionar bien para vender espacios de eventos.",
+      "Testimonio corto de un organizador de evento real contando por qué eligió Gala Hotel para su convención o celebración.",
+      "Reel mostrando la capacidad real de un salón con gente adentro (no vacío) para que quien busca un lugar para su evento pueda imaginarse el tamaño real."
+    ]
+  },
+  "gala-recepciones": {
+    insights: [
+      "Todavía no hay suficiente historial de rendimiento acumulado para esta unidad — estas ideas parten de los pilares de contenido definidos, no de datos de performance todavía."
+    ],
+    contentIdeas: [
+      "Reel de detrás de escena de una recepción real, desde el salón vacío por la mañana hasta el evento en marcha por la noche.",
+      "Presentación del BOX de comida (producto nuevo) mostrando el unboxing real, no solo fotos del packaging — generar curiosidad antes del lanzamiento de septiembre.",
+      "Testimonios de familias que ya vivieron una recepción en Gala, contando un detalle específico que recuerdan (no un elogio genérico)."
+    ]
+  }
 };
 
 function ideasKey(unitId) {
@@ -333,7 +383,7 @@ function saveIdeas(unitId, ideas) {
 
 function renderIdeas(unit) {
   const ideas = loadIdeas(unit.id);
-  const recs = MOCK_RECOMMENDATIONS[unit.id] || MOCK_RECOMMENDATIONS.default;
+  const recs = MOCK_RECOMMENDATIONS[unit.id] || { insights: [], contentIdeas: [] };
 
   return `
     <div class="section-block">
@@ -342,8 +392,13 @@ function renderIdeas(unit) {
           <h3 class="panel__title">Especialista automático de RRSS</h3>
           <span class="preview-badge">Vista previa · análisis manual, no automatizado todavía</span>
         </div>
+        <h4 class="rec-group__title">📊 Qué está funcionando</h4>
         <ul class="rec-list">
-          ${recs.map((r) => `<li class="rec-list__item"><span class="rec-list__icon">🤖</span><span>${r}</span></li>`).join("")}
+          ${recs.insights.map((r) => `<li class="rec-list__item"><span class="rec-list__icon">🤖</span><span>${r}</span></li>`).join("")}
+        </ul>
+        <h4 class="rec-group__title">💡 Ideas de contenido para probar</h4>
+        <ul class="rec-list">
+          ${recs.contentIdeas.map((r) => `<li class="rec-list__item rec-list__item--idea"><span class="rec-list__icon">✏️</span><span>${r}</span></li>`).join("")}
         </ul>
       </div>
 

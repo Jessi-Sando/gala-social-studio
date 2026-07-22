@@ -407,6 +407,18 @@ main {
   border-radius: 999px;
 }
 
+.rec-group__title {
+  font-family: var(--font-body);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-faint);
+  margin: 1.1rem 0 0.6rem;
+}
+
+.rec-group__title:first-of-type { margin-top: 0; }
+
 .rec-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.7rem; }
 
 .rec-list__item {
@@ -420,6 +432,11 @@ main {
   background: var(--bg-sunken);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
+}
+
+.rec-list__item--idea {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-soft));
+  color: var(--text);
 }
 
 .rec-list__icon { flex-shrink: 0; font-size: 1.1rem; }
