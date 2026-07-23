@@ -85,9 +85,9 @@ let currentCalMonth = "julio";
 
 // ---------- Sección: Resumen ----------
 
-function renderMiniChart(history) {
+function renderMiniChart(history, big) {
   if (!history || history.length === 0) return "";
-  const width = 560, height = 120, pad = 8;
+  const width = 560, height = big ? 220 : 120, pad = 10;
   const max = Math.max(1, ...history.map((d) => d.views || 0));
   const pts = history.map((d, i) => {
     const x = history.length === 1 ? width / 2 : pad + (i / (history.length - 1)) * (width - pad * 2);
@@ -95,11 +95,18 @@ function renderMiniChart(history) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   const area = `M${pad},${height - pad} L${pts.join(" L")} L${width - pad},${height - pad} Z`;
+  const dots = big
+    ? history.map((d, i) => {
+        const [x, y] = pts[i].split(",");
+        return `<circle cx="${x}" cy="${y}" r="3.5" class="mini-chart__dot"><title>${d.date}: ${(d.views || 0).toLocaleString("es-AR")} vistas</title></circle>`;
+      }).join("")
+    : "";
   return `
-    <div class="mini-chart">
+    <div class="mini-chart${big ? " mini-chart--big" : ""}">
       <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
         <path d="${area}" class="mini-chart__area"></path>
-        <polyline points="${pts.join(" ")}" class="mini-chart__line"></polyline>
+        <polyline points="${pts.join(" ")}" class="mini-chart__line" data-animate-line></polyline>
+        ${dots}
       </svg>
     </div>
   `;
@@ -426,38 +433,187 @@ function renderIdeas(unit) {
 
 // ---------- Sección: Métricas ----------
 
+function computeTrend(current, previous) {
+  if (previous === null || previous === undefined) return { dir: null, pct: null };
+  if (previous === 0) {
+    if (current === 0) return { dir: null, pct: null };
+    return { dir: "up", pct: null };
+  }
+  const pct = ((current - previous) / Math.abs(previous)) * 100;
+  if (Math.abs(pct) < 0.5) return { dir: null, pct: 0 };
+  return { dir: pct > 0 ? "up" : "down", pct };
+}
+
+function renderTrendBadge(trend) {
+  if (!trend || trend.dir === null) {
+    return `<span class="trend-badge trend-badge--flat">— sin datos previos</span>`;
+  }
+  const arrow = trend.dir === "up" ? "▲" : "▼";
+  const cls = trend.dir === "up" ? "trend-badge--up" : "trend-badge--down";
+  const pctLabel = trend.pct !== null ? ` ${Math.abs(trend.pct).toFixed(0)}%` : "";
+  return `<span class="trend-badge ${cls}">${arrow}${pctLabel}</span>`;
+}
+
+function heroCard(label, rawValue, trend, delayMs) {
+  return `
+    <div class="hero-card" style="animation-delay:${delayMs}ms">
+      <span class="hero-card__label">${label}</span>
+      <span class="hero-card__value" data-countup data-target="${rawValue}">0</span>
+      ${renderTrendBadge(trend)}
+    </div>
+  `;
+}
+
+function renderBarChart(bars) {
+  const max = Math.max(1, ...bars.map((b) => b.value));
+  return `
+    <div class="bar-chart">
+      ${bars.map((b, i) => `
+        <div class="bar-chart__col">
+          <span class="bar-chart__value">${b.connected ? fmtNum(b.value) : "No conectado"}</span>
+          <div class="bar-chart__track">
+            <div class="bar-chart__fill${b.connected ? "" : " bar-chart__fill--disconnected"}" data-bar-target="${b.connected ? (b.value / max) * 100 : 6}" style="transition-delay:${i * 120 + 200}ms"></div>
+          </div>
+          <span class="bar-chart__label">${b.icon} ${b.label}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderMetricas(unit) {
   const history = (unit.performance && unit.performance.history) || [];
-  if (!history.length) {
-    return `<div class="section-block"><p class="empty-note">Todavía no hay métricas acumuladas de cuenta para esta unidad.</p></div>`;
-  }
-  const last = history[history.length - 1];
-  const totalViews = history.reduce((a, d) => a + (d.views || 0), 0);
-  const totalInteractions = history.reduce((a, d) => a + (d.interactions || 0), 0);
-  const totalReach = history.reduce((a, d) => a + (d.reach || 0), 0);
+  const items = getAllItems(unit);
 
-  const tiles = [
-    { icon: "▶", value: fmtNum(totalViews), label: "Visualizaciones" },
-    { icon: "💬", value: fmtNum(totalInteractions), label: "Interacciones" },
-    { icon: "👁", value: fmtNum(totalReach), label: "Alcance" },
-    { icon: "📷", value: last.followers != null ? fmtNum(last.followers) : "—", label: "Seguidores Instagram" },
-    { icon: "📘", value: last.fbFollowers != null ? fmtNum(last.fbFollowers) : "—", label: "Seguidores Facebook" },
-    { icon: "👤", value: fmtNum(history.reduce((a, d) => a + (d.profileViews || 0), 0)), label: "Visitas al perfil" }
+  if (!history.length) {
+    return `<div class="section-block"><p class="empty-note">Todavía no hay métricas acumuladas de cuenta para esta unidad — se van a ir completando con la sincronización diaria.</p></div>`;
+  }
+
+  const last = history[history.length - 1];
+  const half = Math.floor(history.length / 2);
+  const firstHalf = history.slice(0, half);
+  const secondHalf = history.slice(half);
+  const avgOf = (arr, key) => (arr.length ? arr.reduce((a, d) => a + (d[key] || 0), 0) / arr.length : null);
+
+  // Seguidores totales (IG + FB) — tendencia: suma de altas/bajas diarias reales.
+  const totalFollowers = (last.followers || 0) + (last.fbFollowers || 0);
+  const followersDelta = history.reduce((a, d) => a + (d.followersDelta || 0), 0);
+  const followersTrend = followersDelta === 0 ? { dir: null, pct: null } : { dir: followersDelta > 0 ? "up" : "down", pct: null };
+
+  // Interacción promedio por día.
+  const avgInteractions = Math.round(avgOf(history, "interactions") || 0);
+  const interactionsTrend = history.length >= 4
+    ? computeTrend(avgOf(secondHalf, "interactions"), avgOf(firstHalf, "interactions"))
+    : { dir: null, pct: null };
+
+  // Visualizaciones del mes en curso vs. mes anterior.
+  const now = new Date();
+  const sameMonth = (d, ref) => d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth();
+  const prevMonthRef = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  let viewsThisMonth = 0, viewsPrevMonth = 0;
+  history.forEach((d) => {
+    const dt = new Date(d.date + "T00:00:00");
+    if (sameMonth(dt, now)) viewsThisMonth += d.views || 0;
+    else if (sameMonth(dt, prevMonthRef)) viewsPrevMonth += d.views || 0;
+  });
+  const viewsTrend = computeTrend(viewsThisMonth, viewsPrevMonth || null);
+
+  // Mejor post: preferentemente de los últimos 7 días; si no hay, el mejor histórico.
+  const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
+  const published = items.filter((i) => typeof i.likes === "number");
+  const recentPublished = published.filter((i) => { const d = parseMetaDate(i.meta); return d && d >= weekAgo; });
+  const pool = recentPublished.length ? recentPublished : published;
+  const bestPost = [...pool].sort((a, b) => (b.views || b.likes || 0) - (a.views || a.likes || 0))[0];
+  const bestPostLabel = recentPublished.length ? "Mejor post de la semana" : "Mejor post (histórico)";
+
+  const heroCards = [
+    heroCard("Seguidores totales", totalFollowers, followersTrend, 0),
+    heroCard("Interacción promedio / día", avgInteractions, interactionsTrend, 70),
+    heroCard("Visualizaciones del mes", viewsThisMonth, viewsTrend, 140)
+  ].join("");
+
+  const bestPostCard = bestPost ? `
+    <div class="hero-card hero-card--post" style="animation-delay:210ms">
+      <span class="hero-card__label">${bestPostLabel}</span>
+      <span class="hero-card__value" data-countup data-target="${bestPost.views || bestPost.likes}">0</span>
+      <span class="hero-card__post-title">${thumbFor(bestPost).icon} ${bestPost.title}</span>
+    </div>
+  ` : `
+    <div class="hero-card hero-card--post" style="animation-delay:210ms">
+      <span class="hero-card__label">${bestPostLabel}</span>
+      <span class="hero-card__post-title">Todavía no hay publicaciones con datos reales.</span>
+    </div>
+  `;
+
+  const bars = [
+    { label: "Instagram", icon: "📷", value: avgOf(history, "interactions") ? Math.round(history.reduce((a, d) => a + (d.interactions || 0), 0)) : 0, connected: true },
+    { label: "Facebook", icon: "📘", value: 0, connected: false },
+    { label: "TikTok", icon: "🎵", value: 0, connected: false }
   ];
+  // Facebook está vinculado pero todavía no traemos interacciones nativas de la página (solo seguidores);
+  // se muestra sin datos en vez de inventar un número.
 
   return `
     <div class="section-block">
-      <div class="metric-tiles">
-        ${tiles.map((t) => `
-          <div class="metric-tile">
-            <span class="metric-tile__icon">${t.icon}</span>
-            <span class="metric-tile__value">${t.value}</span>
-            <span class="metric-tile__label">${t.label}</span>
-          </div>
-        `).join("")}
+      <div class="hero-grid">
+        ${heroCards}
+        ${bestPostCard}
+      </div>
+
+      <div class="panel">
+        <h3 class="panel__title">Crecimiento — últimos ${history.length} día${history.length === 1 ? "" : "s"}</h3>
+        ${renderMiniChart(history, true)}
+      </div>
+
+      <div class="panel">
+        <h3 class="panel__title">Rendimiento por red</h3>
+        ${renderBarChart(bars)}
       </div>
     </div>
   `;
+}
+
+// Se usa setTimeout (no requestAnimationFrame) para programar los pasos de
+// la animación: rAF se pausa por completo en pestañas en segundo plano o sin
+// foco, lo que dejaría los números/gráficos "trabados" en su estado inicial
+// en esos casos. setTimeout a ~60fps se ve igual de fluido y es más robusto.
+function animateMetricas() {
+  const FRAME_MS = 16;
+
+  // Números: cuentan desde 0 hasta el valor real.
+  document.querySelectorAll("[data-countup]").forEach((el) => {
+    const target = parseFloat(el.dataset.target) || 0;
+    const duration = 900;
+    const start = Date.now();
+    function tick() {
+      const progress = Math.min(1, (Date.now() - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      el.textContent = fmtNum(Math.round(target * eased));
+      if (progress < 1) setTimeout(tick, FRAME_MS);
+    }
+    tick();
+  });
+
+  // Línea del gráfico: se dibuja de izquierda a derecha.
+  const line = document.querySelector("[data-animate-line]");
+  if (line) {
+    const length = line.getTotalLength();
+    line.style.transition = "none";
+    line.style.strokeDasharray = String(length);
+    line.style.strokeDashoffset = String(length);
+    setTimeout(() => {
+      line.style.transition = "stroke-dashoffset 1.1s ease";
+      line.style.strokeDashoffset = "0";
+    }, FRAME_MS);
+  }
+
+  // Barras: crecen desde 0 hasta su altura real.
+  document.querySelectorAll("[data-bar-target]").forEach((el) => {
+    const target = parseFloat(el.dataset.barTarget) || 0;
+    setTimeout(() => {
+      el.style.height = `${target}%`;
+    }, FRAME_MS);
+  });
 }
 
 // ---------- Render principal ----------
@@ -496,6 +652,10 @@ function renderUnit(unit) {
     ${renderSectionNav()}
     ${sectionHtml}
   `;
+
+  if (currentSection === "metricas" || currentSection === "resumen") {
+    setTimeout(animateMetricas, 16);
+  }
 }
 
 function setSection(section) {

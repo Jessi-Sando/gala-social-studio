@@ -303,8 +303,10 @@ main {
 }
 
 .mini-chart svg { width: 100%; height: 120px; display: block; }
+.mini-chart--big svg { height: 220px; }
 .mini-chart__area { fill: color-mix(in srgb, var(--accent) 20%, transparent); stroke: none; }
-.mini-chart__line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.mini-chart__line { fill: none; stroke: var(--accent); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.mini-chart__dot { fill: var(--bg); stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
 
 .best-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 
@@ -495,37 +497,119 @@ main {
 
 .idea-delete:hover { color: var(--accent); }
 
-/* ---------- Métricas ---------- */
+/* ---------- Métricas: hero cards ---------- */
 
-.metric-tiles {
+@keyframes hero-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.hero-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1rem;
 }
 
-.metric-tile {
-  background: var(--bg-elevated);
+.hero-card {
+  background: linear-gradient(160deg, var(--bg-elevated), var(--bg-sunken));
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.4rem 1.3rem;
+  padding: 1.5rem 1.4rem;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.5rem;
+  animation: hero-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
-.metric-tile__icon { font-size: 1.4rem; opacity: 0.8; }
-
-.metric-tile__value {
-  font-family: var(--font-display);
-  font-size: 2.3rem;
+.hero-card__label {
+  font-size: 0.8rem;
   font-weight: 600;
-  color: var(--text);
-}
-
-.metric-tile__label {
-  font-size: 0.82rem;
   color: var(--text-muted);
 }
+
+.hero-card__value {
+  font-family: var(--font-display);
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.hero-card--post .hero-card__value { color: var(--text); }
+
+.hero-card__post-title {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.trend-badge {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+}
+
+.trend-badge--up { color: #4caf6e; background: rgba(76, 175, 110, 0.14); }
+.trend-badge--down { color: #e5493f; background: rgba(229, 73, 63, 0.14); }
+.trend-badge--flat { color: var(--text-faint); background: rgba(255, 255, 255, 0.03); font-weight: 500; }
+
+/* ---------- Bar chart (rendimiento por red) ---------- */
+
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 1.5rem;
+  height: 200px;
+  padding-top: 1.5rem;
+}
+
+.bar-chart__col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  height: 100%;
+}
+
+.bar-chart__value {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.bar-chart__track {
+  flex: 1;
+  width: 100%;
+  max-width: 72px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px 8px 4px 4px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.bar-chart__fill {
+  width: 100%;
+  height: 0%;
+  background: linear-gradient(180deg, var(--accent), var(--accent-deep));
+  border-radius: 8px 8px 0 0;
+  transition: height 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bar-chart__fill--disconnected {
+  background: repeating-linear-gradient(135deg, var(--border) 0 6px, transparent 6px 12px);
+}
+
+.bar-chart__label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 
 /* ---------- Filtros ---------- */
 
@@ -713,8 +797,10 @@ main {
   .cal-chip { font-size: 0; padding: 0; height: 6px; width: 6px; border-radius: 50%; background: var(--accent); }
   .cal-chip--more { display: none; }
   .kpi-card__value { font-size: 1.5rem; }
-  .metric-tile__value { font-size: 1.8rem; }
   .idea-add-btn { align-self: stretch; }
+  .hero-card__value { font-size: 2rem; }
+  .bar-chart { gap: 0.7rem; height: 160px; }
+  .bar-chart__track { max-width: 48px; }
 }
 
 @media (max-width: 420px) {
