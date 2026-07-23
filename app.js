@@ -18,6 +18,9 @@ const THUMB_STYLES = {
 
 const STATUS_LABELS = { borrador: "Borrador", listo: "Listo", programado: "Programado", publicado: "Publicado" };
 
+const PLATFORM_ICONS = { instagram: "📷", facebook: "📘", tiktok: "🎵" };
+const PLATFORM_LABELS = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok" };
+
 const SECTIONS = [
   { key: "resumen", label: "Resumen", icon: "📊" },
   { key: "calendario", label: "Calendario", icon: "🗓️" },
@@ -48,6 +51,16 @@ function fmtNum(n) {
   return (n || 0).toLocaleString("es-AR");
 }
 
+const DIACRITICS_RE = new RegExp("[\\u0300-\\u036f]", "g");
+
+function slugify(str) {
+  return String(str)
+    .toLowerCase()
+    .normalize("NFD").replace(DIACRITICS_RE, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
 // ---------- Datos derivados ----------
 
 function getAllItems(unit) {
@@ -59,6 +72,7 @@ function getAllItems(unit) {
 }
 
 function deriveStatus(item) {
+  if (item.status) return item.status; // fijado a mano (creado o editado en el panel del día)
   if (typeof item.likes === "number") return "publicado";
   const tags = (item.tags || []).map((t) => t.toLowerCase());
   const hasDate = Boolean(parseMetaDate(item.meta));
@@ -187,62 +201,293 @@ function renderResumen(unit) {
 
 // ---------- Sección: Calendario ----------
 
-function renderCalendario(unit) {
-  const monthIdx = MONTH_NUM[{ junio: "jun", julio: "jul", agosto: "ago", septiembre: "sep" }[currentCalMonth]];
-  const items = (unit.months[currentCalMonth] || []).map((i) => ({ ...i, date: parseMetaDate(i.meta) }));
-  const byDay = {};
-  const noDate = [];
-  items.forEach((i) => {
-    if (i.date) {
-      const key = i.date.getDate();
-      (byDay[key] = byDay[key] || []).push(i);
-    } else {
-      noDate.push(i);
-    }
-  });
+const MONTH_TO_ABBR = { junio: "jun", julio: "jul", agosto: "ago", septiembre: "sep" };
 
+function overlayKey(unitId) {
+  return `gala-social-studio:posts-overlay:${unitId}`;
+}
+
+function loadOverlay(unitId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(overlayKey(unitId)) || "null");
+    if (raw && Array.isArray(raw.extra) && raw.overrides) return raw;
+  } catch { /* ignore */ }
+  return { extra: [], overrides: {} };
+}
+
+function saveOverlay(unitId, overlay) {
+  localStorage.setItem(overlayKey(unitId), JSON.stringify(overlay));
+}
+
+function postKeyFor(item) {
+  return slugify(`${item.title}-${item.meta || ""}`);
+}
+
+function getDayPosts(unit, monthKey, monthIdx, day) {
+  const overlay = loadOverlay(unit.id);
+  const basePosts = (unit.months[monthKey] || [])
+    .map((item) => {
+      const date = parseMetaDate(item.meta);
+      if (!date || date.getMonth() !== monthIdx || date.getDate() !== day) return null;
+      const key = postKeyFor(item);
+      const override = overlay.overrides[key] || {};
+      return {
+        ...item,
+        ...override,
+        platform: override.platform || item.platform || "instagram",
+        _key: key,
+        _source: "base"
+      };
+    })
+    .filter(Boolean);
+  const extraPosts = overlay.extra
+    .filter((p) => p.monthKey === monthKey && p.day === day)
+    .map((p) => ({ ...p, _key: p.id, _source: "extra" }));
+  return [...basePosts, ...extraPosts];
+}
+
+function isDayComplete(dayPosts) {
+  return dayPosts.length > 0 && dayPosts.every((p) => deriveStatus(p) === "programado" || deriveStatus(p) === "publicado");
+}
+
+function renderCalendario(unit) {
+  const monthIdx = MONTH_NUM[MONTH_TO_ABBR[currentCalMonth]];
   const firstDay = new Date(2026, monthIdx, 1);
   const daysInMonth = new Date(2026, monthIdx + 1, 0).getDate();
   const leadingBlanks = (firstDay.getDay() + 6) % 7; // lunes=0
+  const totalCells = leadingBlanks + daysInMonth;
+  const weekRows = Math.ceil(totalCells / 7);
 
   let cells = "";
   for (let i = 0; i < leadingBlanks; i++) cells += `<div class="cal-cell cal-cell--blank"></div>`;
   for (let day = 1; day <= daysInMonth; day++) {
-    const dayItems = byDay[day] || [];
+    const dayPosts = getDayPosts(unit, currentCalMonth, monthIdx, day);
     const isToday = (() => {
       const t = new Date();
       return t.getFullYear() === 2026 && t.getMonth() === monthIdx && t.getDate() === day;
     })();
+    const isEmpty = dayPosts.length === 0;
+    const isComplete = isDayComplete(dayPosts);
+    const cls = [
+      "cal-cell",
+      isToday ? "cal-cell--today" : "",
+      isEmpty ? "cal-cell--empty" : "",
+      isComplete ? "cal-cell--complete" : ""
+    ].filter(Boolean).join(" ");
     cells += `
-      <div class="cal-cell${isToday ? " cal-cell--today" : ""}">
+      <button type="button" class="${cls}" data-cal-day="${day}">
         <span class="cal-cell__day">${day}</span>
         <div class="cal-cell__posts">
-          ${dayItems.slice(0, 3).map((i) => `<span class="cal-chip" title="${i.title}">${thumbFor(i).icon} ${i.title}</span>`).join("")}
-          ${dayItems.length > 3 ? `<span class="cal-chip cal-chip--more">+${dayItems.length - 3} más</span>` : ""}
+          ${dayPosts.slice(0, 3).map((p) => `
+            <span class="cal-post-chip" title="${p.title}">
+              <span class="cal-post-chip__thumb" style="background:${thumbFor(p).gradient}">${thumbFor(p).icon}</span>
+              <span class="cal-post-chip__title">${p.title}</span>
+              <span class="cal-post-chip__platform">${PLATFORM_ICONS[p.platform] || PLATFORM_ICONS.instagram}</span>
+            </span>
+          `).join("")}
+          ${dayPosts.length > 3 ? `<span class="cal-chip cal-chip--more">+${dayPosts.length - 3} más</span>` : ""}
         </div>
-      </div>
+      </button>
     `;
   }
 
   return `
-    <div class="section-block">
-      <div class="cal-month-tabs">
-        ${MONTH_ORDER.map((m) => `<button type="button" class="cal-month-tab${m === currentCalMonth ? " cal-month-tab--active" : ""}" data-cal-month="${m}">${MONTH_LABELS[m]}</button>`).join("")}
+    <div class="cal-fullscreen">
+      <div class="cal-month-nav">
+        <button type="button" class="cal-nav-arrow" id="cal-prev-month" ${currentCalMonth === MONTH_ORDER[0] ? "disabled" : ""}>‹</button>
+        <h3 class="cal-month-nav__label">${MONTH_LABELS[currentCalMonth]} <span class="cal-month-nav__year">2026</span></h3>
+        <button type="button" class="cal-nav-arrow" id="cal-next-month" ${currentCalMonth === MONTH_ORDER[MONTH_ORDER.length - 1] ? "disabled" : ""}>›</button>
       </div>
-      <div class="cal-grid">
+      <div class="cal-grid" style="grid-template-rows: auto repeat(${weekRows}, 1fr)">
         ${WEEKDAY_LABELS.map((w) => `<div class="cal-weekday">${w}</div>`).join("")}
         ${cells}
       </div>
-      ${noDate.length ? `
-        <div class="panel">
-          <h3 class="panel__title">Sin fecha específica este mes</h3>
-          <ul class="best-list">
-            ${noDate.map((i) => `<li class="best-list__item"><span class="best-list__icon">${thumbFor(i).icon}</span><div class="best-list__body"><span class="best-list__title">${i.title}</span><span class="best-list__meta">${i.meta}</span></div></li>`).join("")}
-          </ul>
-        </div>
-      ` : ""}
     </div>
   `;
+}
+
+// ---------- Panel lateral del día (crear/editar posts) ----------
+
+let dayPanelState = null; // { unitId, monthKey, monthIdx, day, editingKey, creating }
+
+function dayLabelFor(day, monthKey) {
+  return `${day} de ${MONTH_LABELS[monthKey].toLowerCase()}`;
+}
+
+function closeDayPanel() {
+  dayPanelState = null;
+  const root = document.getElementById("day-panel-root");
+  if (root) root.innerHTML = "";
+}
+
+function renderDayPanelForm(existingPost) {
+  const p = existingPost || {};
+  const format = ["reel", "flyer", "carrusel"].find((k) => (p.tags || []).includes(k)) || "flyer";
+  const status = existingPost ? deriveStatus(existingPost) : "borrador";
+  const canDelete = existingPost && existingPost._source === "extra";
+  return `
+    <form class="day-panel__form" id="day-panel-form">
+      <label class="day-panel__field">
+        <span>Título</span>
+        <input type="text" id="dp-title" value="${(p.title || "").replace(/"/g, "&quot;")}" required />
+      </label>
+      <label class="day-panel__field">
+        <span>Descripción</span>
+        <textarea id="dp-desc" rows="3">${p.desc || ""}</textarea>
+      </label>
+      <div class="day-panel__field-row">
+        <label class="day-panel__field">
+          <span>Red social</span>
+          <select id="dp-platform">
+            ${Object.keys(PLATFORM_LABELS).map((k) => `<option value="${k}"${p.platform === k ? " selected" : ""}>${PLATFORM_LABELS[k]}</option>`).join("")}
+          </select>
+        </label>
+        <label class="day-panel__field">
+          <span>Formato</span>
+          <select id="dp-format">
+            ${["reel", "flyer", "carrusel"].map((f) => `<option value="${f}"${format === f ? " selected" : ""}>${THUMB_STYLES[f].icon} ${f}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <label class="day-panel__field">
+        <span>Estado</span>
+        <select id="dp-status">
+          ${Object.keys(STATUS_LABELS).map((s) => `<option value="${s}"${status === s ? " selected" : ""}>${STATUS_LABELS[s]}</option>`).join("")}
+        </select>
+      </label>
+      <div class="day-panel__form-actions">
+        ${canDelete ? `<button type="button" class="day-panel__delete" id="dp-delete">Eliminar</button>` : "<span></span>"}
+        <div class="day-panel__form-actions-right">
+          <button type="button" class="day-panel__cancel" id="dp-cancel">Cancelar</button>
+          <button type="submit" class="day-panel__save">Guardar</button>
+        </div>
+      </div>
+    </form>
+  `;
+}
+
+function renderDayPanel() {
+  const root = document.getElementById("day-panel-root");
+  if (!dayPanelState) { root.innerHTML = ""; return; }
+  const { unitId, monthKey, monthIdx, day, editingKey, creating } = dayPanelState;
+  const unit = UNITS.find((u) => u.id === unitId);
+  const posts = getDayPosts(unit, monthKey, monthIdx, day);
+  const editingPost = editingKey ? posts.find((p) => p._key === editingKey) : null;
+  const showForm = creating || Boolean(editingPost);
+
+  root.innerHTML = `
+    <div class="day-panel-backdrop" id="day-panel-backdrop"></div>
+    <aside class="day-panel">
+      <div class="day-panel__header">
+        <h3>${dayLabelFor(day, monthKey)}</h3>
+        <button type="button" class="day-panel__close" id="day-panel-close" aria-label="Cerrar">✕</button>
+      </div>
+      ${showForm ? renderDayPanelForm(editingPost) : `
+        <div class="day-panel__posts">
+          ${posts.length ? posts.map((p) => `
+            <div class="day-panel__post-row">
+              <span class="day-panel__post-thumb" style="background:${thumbFor(p).gradient}">${thumbFor(p).icon}</span>
+              <div class="day-panel__post-body">
+                <span class="day-panel__post-title">${p.title}</span>
+                <span class="day-panel__post-meta">${PLATFORM_ICONS[p.platform] || "📷"} ${PLATFORM_LABELS[p.platform] || "Instagram"} · ${STATUS_LABELS[deriveStatus(p)]}</span>
+              </div>
+              <button type="button" class="day-panel__edit-btn" data-edit-key="${p._key}">Editar</button>
+            </div>
+          `).join("") : `<p class="empty-note">Todavía no hay posts este día.</p>`}
+        </div>
+        <button type="button" class="day-panel__new-btn" id="day-panel-new">+ Nuevo post</button>
+      `}
+    </aside>
+  `;
+}
+
+function openDayPanel(unitId, monthKey, monthIdx, day) {
+  dayPanelState = { unitId, monthKey, monthIdx, day, editingKey: null, creating: false };
+  renderDayPanel();
+}
+
+function initDayPanelEvents() {
+  const root = document.getElementById("day-panel-root");
+
+  root.addEventListener("click", (e) => {
+    if (!dayPanelState) return;
+    if (e.target.id === "day-panel-backdrop" || e.target.id === "day-panel-close") {
+      closeDayPanel();
+      return;
+    }
+    if (e.target.id === "day-panel-new") {
+      dayPanelState.creating = true;
+      dayPanelState.editingKey = null;
+      renderDayPanel();
+      return;
+    }
+    if (e.target.id === "dp-cancel") {
+      dayPanelState.creating = false;
+      dayPanelState.editingKey = null;
+      renderDayPanel();
+      return;
+    }
+    if (e.target.id === "dp-delete") {
+      const overlay = loadOverlay(dayPanelState.unitId);
+      overlay.extra = overlay.extra.filter((p) => p.id !== dayPanelState.editingKey);
+      saveOverlay(dayPanelState.unitId, overlay);
+      dayPanelState.creating = false;
+      dayPanelState.editingKey = null;
+      renderDayPanel();
+      refreshCalendarBehindPanel();
+      return;
+    }
+    const editBtn = e.target.closest(".day-panel__edit-btn");
+    if (editBtn) {
+      dayPanelState.editingKey = editBtn.dataset.editKey;
+      dayPanelState.creating = false;
+      renderDayPanel();
+    }
+  });
+
+  root.addEventListener("submit", (e) => {
+    if (e.target.id !== "day-panel-form" || !dayPanelState) return;
+    e.preventDefault();
+    const { unitId, monthKey, day, editingKey, creating } = dayPanelState;
+    const title = document.getElementById("dp-title").value.trim();
+    if (!title) return;
+    const desc = document.getElementById("dp-desc").value.trim();
+    const platform = document.getElementById("dp-platform").value;
+    const format = document.getElementById("dp-format").value;
+    const status = document.getElementById("dp-status").value;
+    const overlay = loadOverlay(unitId);
+
+    if (creating) {
+      overlay.extra.push({
+        id: `extra-${Date.now()}`,
+        monthKey,
+        day,
+        title,
+        desc,
+        platform,
+        tags: [format],
+        meta: `${day} ${MONTH_TO_ABBR[monthKey]}`,
+        status
+      });
+    } else if (editingKey) {
+      const extraIdx = overlay.extra.findIndex((p) => p.id === editingKey);
+      if (extraIdx > -1) {
+        overlay.extra[extraIdx] = { ...overlay.extra[extraIdx], title, desc, platform, tags: [format], status };
+      } else {
+        overlay.overrides[editingKey] = { title, desc, platform, tags: [format], status };
+      }
+    }
+    saveOverlay(unitId, overlay);
+    dayPanelState.creating = false;
+    dayPanelState.editingKey = null;
+    renderDayPanel();
+    refreshCalendarBehindPanel();
+  });
+}
+
+function refreshCalendarBehindPanel() {
+  const unit = UNITS.find((u) => u.id === currentUnitId);
+  if (unit && currentSection === "calendario") renderUnit(unit);
 }
 
 // ---------- Sección: Contenido ----------
@@ -641,6 +886,8 @@ function renderUnit(unit) {
   else if (currentSection === "ideas") sectionHtml = renderIdeas(unit);
   else if (currentSection === "metricas") sectionHtml = renderMetricas(unit);
 
+  content.classList.toggle("main--full", currentSection === "calendario");
+
   content.innerHTML = `
     <div class="unit-header">
       ${logoHtml}
@@ -661,6 +908,7 @@ function renderUnit(unit) {
 function setSection(section) {
   currentSection = section;
   currentContentFilter = "todos";
+  closeDayPanel();
   const unit = UNITS.find((u) => u.id === currentUnitId);
   if (unit) renderUnit(unit);
 }
@@ -673,6 +921,7 @@ function setActiveTab(unitId) {
   });
   currentUnitId = unitId;
   currentSection = "resumen";
+  closeDayPanel();
   const unit = UNITS.find((u) => u.id === unitId);
   if (unit) {
     renderUnit(unit);
@@ -700,11 +949,20 @@ function initContentEvents() {
       if (unit) renderUnit(unit);
       return;
     }
-    const calMonthBtn = e.target.closest(".cal-month-tab");
-    if (calMonthBtn) {
-      currentCalMonth = calMonthBtn.dataset.calMonth;
-      const unit = UNITS.find((u) => u.id === currentUnitId);
-      if (unit) renderUnit(unit);
+    if (e.target.id === "cal-prev-month" || e.target.id === "cal-next-month") {
+      const idx = MONTH_ORDER.indexOf(currentCalMonth);
+      const nextIdx = e.target.id === "cal-prev-month" ? idx - 1 : idx + 1;
+      if (nextIdx >= 0 && nextIdx < MONTH_ORDER.length) {
+        currentCalMonth = MONTH_ORDER[nextIdx];
+        const unit = UNITS.find((u) => u.id === currentUnitId);
+        if (unit) renderUnit(unit);
+      }
+      return;
+    }
+    const calDayBtn = e.target.closest("[data-cal-day]");
+    if (calDayBtn) {
+      const monthIdx = MONTH_NUM[MONTH_TO_ABBR[currentCalMonth]];
+      openDayPanel(currentUnitId, currentCalMonth, monthIdx, parseInt(calDayBtn.dataset.calDay, 10));
       return;
     }
     const ideaAddBtn = e.target.closest("#idea-add");
@@ -732,6 +990,7 @@ function initContentEvents() {
 function init() {
   renderTabs();
   initContentEvents();
+  initDayPanelEvents();
   const fromHash = window.location.hash.replace("#", "");
   const validIds = UNITS.map((u) => u.id);
   const initialUnit = validIds.includes(fromHash) ? fromHash : validIds[0];
