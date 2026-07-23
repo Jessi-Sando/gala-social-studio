@@ -26,6 +26,7 @@ const SECTIONS = [
   { key: "calendario", label: "Calendario", icon: "🗓️" },
   { key: "contenido", label: "Contenido", icon: "🗂️" },
   { key: "ideas", label: "Ideas", icon: "💡" },
+  { key: "guiones", label: "Guiones", icon: "✍️" },
   { key: "metricas", label: "Métricas", icon: "📈" }
 ];
 
@@ -676,6 +677,201 @@ function renderIdeas(unit) {
   `;
 }
 
+// ---------- Sección: Guiones (generador con IA) ----------
+
+const ANTHROPIC_KEY_STORAGE = "gala-social-studio:anthropic-key";
+const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
+
+function loadApiKey() {
+  return localStorage.getItem(ANTHROPIC_KEY_STORAGE) || "";
+}
+
+function saveApiKey(key) {
+  if (key) localStorage.setItem(ANTHROPIC_KEY_STORAGE, key);
+  else localStorage.removeItem(ANTHROPIC_KEY_STORAGE);
+}
+
+function guionesLibraryKey(unitId) {
+  return `gala-social-studio:guiones:${unitId}`;
+}
+
+function loadGuiones(unitId) {
+  try {
+    return JSON.parse(localStorage.getItem(guionesLibraryKey(unitId)) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveGuiones(unitId, list) {
+  localStorage.setItem(guionesLibraryKey(unitId), JSON.stringify(list));
+}
+
+let guionState = { generating: false, result: null, error: null, topic: "" };
+let guionExpandedId = null;
+
+const GUION_SYSTEM_PROMPT = `Sos un guionista experto en contenido para redes sociales (Instagram, Facebook, TikTok) de negocios de hotelería, gastronomía y entretenimiento en Argentina.
+Te dan un tema y el contexto de una unidad de negocio específica. Generá un guion completo para un video corto de esa unidad.
+
+Tono: profesional pero cercano, como si le hablaras a un amigo. Nada de lenguaje corporativo, acartonado o genérico. Usá "vos" (español rioplatense).
+
+Devolvé SOLO un JSON válido (sin texto antes ni después, sin bloques de código markdown, sin backticks), con exactamente esta forma:
+{
+  "gancho": "las primeras 1-2 frases que enganchan en los primeros 3 segundos",
+  "puntosClave": ["punto 1 a desarrollar", "punto 2", "punto 3"],
+  "cierre": "cierre con llamada a la acción clara y específica",
+  "duracionSugerida": "ej. 15-30 segundos",
+  "formatoSugerido": "reel corto | video largo | historia",
+  "justificacionFormato": "por qué ese formato es el más indicado para este tema, en una frase"
+}`;
+
+async function callAnthropic(unit, topic) {
+  const apiKey = loadApiKey();
+  const userContent = `Unidad de negocio: ${unit.name}
+Objetivo estratégico: ${unit.objective || ""}
+Pilares de contenido: ${unit.pilares || ""}
+
+Tema del video: ${topic}`;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1024,
+      system: GUION_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userContent }]
+    })
+  });
+
+  if (!response.ok) {
+    const errBody = await response.json().catch(() => null);
+    const msg = (errBody && errBody.error && errBody.error.message) || `Error ${response.status}`;
+    throw new Error(msg);
+  }
+
+  const data = await response.json();
+  const text = data.content && data.content[0] && data.content[0].text;
+  if (!text) throw new Error("Respuesta vacía de la API.");
+
+  let cleaned = text.trim().replace(/^```(json)?/i, "").replace(/```$/, "").trim();
+  return JSON.parse(cleaned);
+}
+
+async function handleGenerateScript(unit) {
+  const input = document.getElementById("guion-topic-input");
+  const topic = input ? input.value.trim() : "";
+  if (!topic) return;
+
+  guionState.topic = topic;
+  guionState.generating = true;
+  guionState.error = null;
+  guionState.result = null;
+  renderUnit(unit);
+
+  try {
+    const result = await callAnthropic(unit, topic);
+    guionState.result = { ...result, topic };
+  } catch (err) {
+    guionState.error = err.message || "No se pudo generar el guion. Revisá tu clave de API y probá de nuevo.";
+  }
+  guionState.generating = false;
+  renderUnit(unit);
+}
+
+function renderGuionBlock(icon, label, content) {
+  return `
+    <div class="guion-block">
+      <span class="guion-block__label">${icon} ${label}</span>
+      ${content}
+    </div>
+  `;
+}
+
+function renderGuionResult(result) {
+  return `
+    <div class="panel guion-result">
+      <div class="guion-result__format-row">
+        <span class="guion-result__format-badge">${result.formatoSugerido}</span>
+        <span class="guion-result__duration">⏱ ${result.duracionSugerida}</span>
+      </div>
+      ${result.justificacionFormato ? `<p class="guion-result__justification">${result.justificacionFormato}</p>` : ""}
+      ${renderGuionBlock("🪝", "Gancho", `<p class="guion-block__text">${result.gancho}</p>`)}
+      ${renderGuionBlock("📋", "Puntos clave", `<ul class="guion-block__list">${(result.puntosClave || []).map((p) => `<li>${p}</li>`).join("")}</ul>`)}
+      ${renderGuionBlock("🎯", "Cierre / llamada a la acción", `<p class="guion-block__text">${result.cierre}</p>`)}
+      <button type="button" class="guion-save-btn" id="guion-save-btn">+ Guardar en biblioteca</button>
+    </div>
+  `;
+}
+
+function renderGuiones(unit) {
+  const apiKey = loadApiKey();
+  const library = loadGuiones(unit.id);
+
+  return `
+    <div class="section-block">
+      <div class="panel guion-apikey-panel">
+        ${apiKey ? `
+          <div class="guion-apikey-status">
+            <span>🔑 Clave de Anthropic configurada</span>
+            <button type="button" class="guion-apikey-change" id="guion-apikey-change">Cambiar</button>
+          </div>
+        ` : `
+          <h3 class="panel__title">Conectar tu clave de Anthropic</h3>
+          <p class="empty-note">Se guarda solo en este navegador, nunca se sube al repositorio. Conseguila en console.anthropic.com.</p>
+          <div class="guion-apikey-form">
+            <input type="password" id="guion-apikey-input" placeholder="sk-ant-..." />
+            <button type="button" class="guion-save-btn" id="guion-apikey-save">Guardar clave</button>
+          </div>
+        `}
+      </div>
+
+      <div class="panel">
+        <h3 class="panel__title">Generar guion nuevo</h3>
+        <textarea id="guion-topic-input" class="idea-input" rows="2" placeholder="¿De qué tema querés que hable el video?">${guionState.topic}</textarea>
+        <button type="button" class="guion-generate-btn" id="guion-generate-btn" ${guionState.generating || !apiKey ? "disabled" : ""}>
+          ${guionState.generating ? "Generando..." : "✨ Generar guion"}
+        </button>
+        ${!apiKey ? `<p class="empty-note">Configurá tu clave de Anthropic arriba para poder generar guiones.</p>` : ""}
+        ${guionState.error ? `<p class="guion-error">${guionState.error}</p>` : ""}
+      </div>
+
+      ${guionState.result ? renderGuionResult(guionState.result) : ""}
+
+      <div class="panel">
+        <h3 class="panel__title">Biblioteca de guiones</h3>
+        ${library.length ? `
+          <ul class="guion-library">
+            ${library.map((g) => `
+              <li class="guion-library__item">
+                <div class="guion-library__header" data-toggle-guion="${g.id}">
+                  <div class="guion-library__header-text">
+                    <span class="guion-library__topic">${g.topic}</span>
+                    <span class="guion-library__meta">${g.formatoSugerido} · ${g.duracionSugerida}</span>
+                  </div>
+                  <button type="button" class="guion-library__delete" data-delete-guion="${g.id}" aria-label="Eliminar">✕</button>
+                </div>
+                ${guionExpandedId === g.id ? `
+                  <div class="guion-library__body">
+                    ${renderGuionBlock("🪝", "Gancho", `<p class="guion-block__text">${g.gancho}</p>`)}
+                    ${renderGuionBlock("📋", "Puntos clave", `<ul class="guion-block__list">${(g.puntosClave || []).map((p) => `<li>${p}</li>`).join("")}</ul>`)}
+                    ${renderGuionBlock("🎯", "Cierre", `<p class="guion-block__text">${g.cierre}</p>`)}
+                  </div>
+                ` : ""}
+              </li>
+            `).join("")}
+          </ul>
+        ` : `<p class="empty-note">Todavía no guardaste ningún guion para ${unit.name}.</p>`}
+      </div>
+    </div>
+  `;
+}
+
 // ---------- Sección: Métricas ----------
 
 function computeTrend(current, previous) {
@@ -884,6 +1080,7 @@ function renderUnit(unit) {
   else if (currentSection === "calendario") sectionHtml = renderCalendario(unit);
   else if (currentSection === "contenido") sectionHtml = renderContenido(unit);
   else if (currentSection === "ideas") sectionHtml = renderIdeas(unit);
+  else if (currentSection === "guiones") sectionHtml = renderGuiones(unit);
   else if (currentSection === "metricas") sectionHtml = renderMetricas(unit);
 
   content.classList.toggle("main--full", currentSection === "calendario");
@@ -908,6 +1105,8 @@ function renderUnit(unit) {
 function setSection(section) {
   currentSection = section;
   currentContentFilter = "todos";
+  guionState = { generating: false, result: null, error: null, topic: "" };
+  guionExpandedId = null;
   closeDayPanel();
   const unit = UNITS.find((u) => u.id === currentUnitId);
   if (unit) renderUnit(unit);
@@ -921,6 +1120,8 @@ function setActiveTab(unitId) {
   });
   currentUnitId = unitId;
   currentSection = "resumen";
+  guionState = { generating: false, result: null, error: null, topic: "" };
+  guionExpandedId = null;
   closeDayPanel();
   const unit = UNITS.find((u) => u.id === unitId);
   if (unit) {
@@ -983,6 +1184,57 @@ function initContentEvents() {
       saveIdeas(currentUnitId, ideas);
       const unit = UNITS.find((u) => u.id === currentUnitId);
       if (unit) renderUnit(unit);
+      return;
+    }
+    if (e.target.id === "guion-apikey-save") {
+      const input = document.getElementById("guion-apikey-input");
+      const key = input ? input.value.trim() : "";
+      if (!key) return;
+      saveApiKey(key);
+      const unit = UNITS.find((u) => u.id === currentUnitId);
+      if (unit) renderUnit(unit);
+      return;
+    }
+    if (e.target.id === "guion-apikey-change") {
+      saveApiKey("");
+      const unit = UNITS.find((u) => u.id === currentUnitId);
+      if (unit) renderUnit(unit);
+      return;
+    }
+    if (e.target.id === "guion-generate-btn") {
+      const unit = UNITS.find((u) => u.id === currentUnitId);
+      if (unit) handleGenerateScript(unit);
+      return;
+    }
+    if (e.target.id === "guion-save-btn") {
+      const list = loadGuiones(currentUnitId);
+      list.unshift({ ...guionState.result, id: `guion-${Date.now()}` });
+      saveGuiones(currentUnitId, list);
+      guionState = { generating: false, result: null, error: null, topic: "" };
+      const unit = UNITS.find((u) => u.id === currentUnitId);
+      if (unit) renderUnit(unit);
+      return;
+    }
+    const deleteGuionBtn = e.target.closest("[data-delete-guion]");
+    if (deleteGuionBtn) {
+      const list = loadGuiones(currentUnitId).filter((g) => g.id !== deleteGuionBtn.dataset.deleteGuion);
+      saveGuiones(currentUnitId, list);
+      const unit = UNITS.find((u) => u.id === currentUnitId);
+      if (unit) renderUnit(unit);
+      return;
+    }
+    const toggleGuionBtn = e.target.closest("[data-toggle-guion]");
+    if (toggleGuionBtn) {
+      const id = toggleGuionBtn.dataset.toggleGuion;
+      guionExpandedId = guionExpandedId === id ? null : id;
+      const unit = UNITS.find((u) => u.id === currentUnitId);
+      if (unit) renderUnit(unit);
+    }
+  });
+
+  document.getElementById("content").addEventListener("input", (e) => {
+    if (e.target.id === "guion-topic-input") {
+      guionState.topic = e.target.value;
     }
   });
 }
