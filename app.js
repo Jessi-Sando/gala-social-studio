@@ -27,6 +27,7 @@ const SECTIONS = [
   { key: "contenido", label: "Contenido", icon: "🗂️" },
   { key: "ideas", label: "Ideas", icon: "💡" },
   { key: "guiones", label: "Guiones", icon: "✍️" },
+  { key: "carruseles", label: "Carruseles", icon: "🎠" },
   { key: "metricas", label: "Métricas", icon: "📈" }
 ];
 
@@ -809,27 +810,33 @@ function renderGuionResult(result) {
   `;
 }
 
+function renderApiKeyPanel(apiKey) {
+  return `
+    <div class="panel guion-apikey-panel">
+      ${apiKey ? `
+        <div class="guion-apikey-status">
+          <span>🔑 Clave de Anthropic configurada</span>
+          <button type="button" class="guion-apikey-change" id="guion-apikey-change">Cambiar</button>
+        </div>
+      ` : `
+        <h3 class="panel__title">Conectar tu clave de Anthropic</h3>
+        <p class="empty-note">Se guarda solo en este navegador, nunca se sube al repositorio. Conseguila en console.anthropic.com.</p>
+        <div class="guion-apikey-form">
+          <input type="password" id="guion-apikey-input" placeholder="sk-ant-..." />
+          <button type="button" class="guion-save-btn" id="guion-apikey-save">Guardar clave</button>
+        </div>
+      `}
+    </div>
+  `;
+}
+
 function renderGuiones(unit) {
   const apiKey = loadApiKey();
   const library = loadGuiones(unit.id);
 
   return `
     <div class="section-block">
-      <div class="panel guion-apikey-panel">
-        ${apiKey ? `
-          <div class="guion-apikey-status">
-            <span>🔑 Clave de Anthropic configurada</span>
-            <button type="button" class="guion-apikey-change" id="guion-apikey-change">Cambiar</button>
-          </div>
-        ` : `
-          <h3 class="panel__title">Conectar tu clave de Anthropic</h3>
-          <p class="empty-note">Se guarda solo en este navegador, nunca se sube al repositorio. Conseguila en console.anthropic.com.</p>
-          <div class="guion-apikey-form">
-            <input type="password" id="guion-apikey-input" placeholder="sk-ant-..." />
-            <button type="button" class="guion-save-btn" id="guion-apikey-save">Guardar clave</button>
-          </div>
-        `}
-      </div>
+      ${renderApiKeyPanel(apiKey)}
 
       <div class="panel">
         <h3 class="panel__title">Generar guion nuevo</h3>
@@ -868,6 +875,184 @@ function renderGuiones(unit) {
           </ul>
         ` : `<p class="empty-note">Todavía no guardaste ningún guion para ${unit.name}.</p>`}
       </div>
+    </div>
+  `;
+}
+
+// ---------- Sección: Carruseles (generador visual con IA) ----------
+
+const CAROUSEL_STYLES = [
+  { key: "clasico", label: "Gala Clásico", swatch: "linear-gradient(135deg, #1c1712, #ff7a1a)" },
+  { key: "editorial", label: "Claro Editorial", swatch: "linear-gradient(135deg, #f5eee3, #c4571a)" },
+  { key: "vibrante", label: "Vibrante", swatch: "linear-gradient(135deg, #ff7a1a, #6c1f8f)" }
+];
+
+let carruselState = { generating: false, error: null, topic: "", slides: null, style: "clasico" };
+
+const CARRUSEL_SYSTEM_PROMPT = `Sos un experto en contenido para carruseles de Instagram de negocios de hotelería, gastronomía y entretenimiento en Argentina.
+Te dan un tema y el contexto de una unidad de negocio. Generá el texto completo para un carrusel de Instagram de entre 5 y 7 filminas sobre ese tema.
+
+Tono: profesional pero cercano, como si le hablaras a un amigo. Usá "vos" (español rioplatense). Los textos deben ser CORTOS y de alto impacto visual (no párrafos largos): pensalos para que se lean en 2-3 segundos por filmina.
+
+Estructura:
+- Filmina 1: el gancho que detiene el scroll.
+- Filminas del medio: desarrollo del contenido, una idea por filmina.
+- Última filmina: cierre con llamada a la acción clara.
+
+Devolvé SOLO un JSON válido (sin texto antes ni después, sin bloques de código markdown, sin backticks), con exactamente esta forma:
+{
+  "slides": [
+    { "type": "gancho", "title": "título corto de la filmina 1", "body": "texto de apoyo breve, puede ser vacío" },
+    { "type": "desarrollo", "title": "...", "body": "..." },
+    { "type": "cierre", "title": "...", "body": "llamada a la acción" }
+  ]
+}`;
+
+async function callAnthropicCarrusel(unit, topic) {
+  const apiKey = loadApiKey();
+  const userContent = `Unidad de negocio: ${unit.name}
+Objetivo estratégico: ${unit.objective || ""}
+Pilares de contenido: ${unit.pilares || ""}
+
+Tema del carrusel: ${topic}`;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1536,
+      system: CARRUSEL_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userContent }]
+    })
+  });
+
+  if (!response.ok) {
+    const errBody = await response.json().catch(() => null);
+    const msg = (errBody && errBody.error && errBody.error.message) || `Error ${response.status}`;
+    throw new Error(msg);
+  }
+
+  const data = await response.json();
+  const text = data.content && data.content[0] && data.content[0].text;
+  if (!text) throw new Error("Respuesta vacía de la API.");
+
+  const cleaned = text.trim().replace(/^```(json)?/i, "").replace(/```$/, "").trim();
+  const parsed = JSON.parse(cleaned);
+  if (!Array.isArray(parsed.slides) || !parsed.slides.length) throw new Error("La respuesta no trajo filminas.");
+  return parsed.slides.map((s, i) => ({ id: `slide-${i}`, type: s.type || "desarrollo", title: s.title || "", body: s.body || "" }));
+}
+
+async function handleGenerateCarrusel(unit) {
+  const input = document.getElementById("carrusel-topic-input");
+  const topic = input ? input.value.trim() : "";
+  if (!topic) return;
+
+  carruselState.topic = topic;
+  carruselState.generating = true;
+  carruselState.error = null;
+  carruselState.slides = null;
+  renderUnit(unit);
+
+  try {
+    carruselState.slides = await callAnthropicCarrusel(unit, topic);
+  } catch (err) {
+    carruselState.error = err.message || "No se pudo generar el carrusel. Revisá tu clave de API y probá de nuevo.";
+  }
+  carruselState.generating = false;
+  renderUnit(unit);
+}
+
+async function handleDownloadCarrusel() {
+  const btn = document.getElementById("carrusel-download-btn");
+  if (!btn || typeof html2canvas === "undefined" || typeof JSZip === "undefined") return;
+  const slideEls = Array.from(document.querySelectorAll(".carousel-slide"));
+  if (!slideEls.length) return;
+
+  btn.disabled = true;
+  btn.textContent = "Generando imágenes...";
+  try {
+    const zip = new JSZip();
+    for (let i = 0; i < slideEls.length; i++) {
+      const canvas = await html2canvas(slideEls[i], { scale: 2, backgroundColor: null });
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      zip.file(`filmina-${i + 1}.png`, blob);
+    }
+    const zipBlob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `carrusel-${slugify(carruselState.topic || "sin-titulo")}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    carruselState.error = "No se pudieron generar las imágenes para descargar.";
+    const unit = UNITS.find((u) => u.id === currentUnitId);
+    if (unit) renderUnit(unit);
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = "⬇ Descargar todo (.zip)";
+}
+
+function renderCarouselSlide(slide, index, total, style) {
+  return `
+    <div class="carousel-slide carousel-slide--${style} carousel-slide--${slide.type}" data-slide-id="${slide.id}">
+      <span class="carousel-slide__index">${index + 1}/${total}</span>
+      <div class="carousel-slide__content">
+        <h4 class="carousel-slide__title" contenteditable="true" data-slide-field="title" data-slide-id="${slide.id}">${slide.title}</h4>
+        ${slide.body ? `<p class="carousel-slide__body" contenteditable="true" data-slide-field="body" data-slide-id="${slide.id}">${slide.body}</p>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderCarruseles(unit) {
+  const apiKey = loadApiKey();
+
+  return `
+    <div class="section-block">
+      ${renderApiKeyPanel(apiKey)}
+
+      <div class="panel">
+        <h3 class="panel__title">Generar carrusel nuevo</h3>
+        <textarea id="carrusel-topic-input" class="idea-input" rows="2" placeholder="¿De qué tema querés que hable el carrusel?">${carruselState.topic}</textarea>
+        <button type="button" class="guion-generate-btn" id="carrusel-generate-btn" ${carruselState.generating || !apiKey ? "disabled" : ""}>
+          ${carruselState.generating ? "Generando..." : "✨ Generar carrusel"}
+        </button>
+        ${!apiKey ? `<p class="empty-note">Configurá tu clave de Anthropic arriba para poder generar carruseles.</p>` : ""}
+        ${carruselState.error ? `<p class="guion-error">${carruselState.error}</p>` : ""}
+      </div>
+
+      ${carruselState.slides ? `
+        <div class="panel">
+          <div class="panel__title-row">
+            <h3 class="panel__title">Estilo visual</h3>
+          </div>
+          <div class="carousel-style-picker">
+            ${CAROUSEL_STYLES.map((s) => `
+              <button type="button" class="carousel-style-btn${carruselState.style === s.key ? " carousel-style-btn--active" : ""}" data-carrusel-style="${s.key}">
+                <span class="carousel-style-btn__swatch" style="background:${s.swatch}"></span>
+                ${s.label}
+              </button>
+            `).join("")}
+          </div>
+
+          <div class="carousel-preview">
+            ${carruselState.slides.map((s, i) => renderCarouselSlide(s, i, carruselState.slides.length, carruselState.style)).join("")}
+          </div>
+
+          <p class="empty-note">Tocá cualquier texto de las filminas para editarlo antes de descargar.</p>
+          <button type="button" class="guion-save-btn" id="carrusel-download-btn">⬇ Descargar todo (.zip)</button>
+        </div>
+      ` : ""}
     </div>
   `;
 }
@@ -1081,6 +1266,7 @@ function renderUnit(unit) {
   else if (currentSection === "contenido") sectionHtml = renderContenido(unit);
   else if (currentSection === "ideas") sectionHtml = renderIdeas(unit);
   else if (currentSection === "guiones") sectionHtml = renderGuiones(unit);
+  else if (currentSection === "carruseles") sectionHtml = renderCarruseles(unit);
   else if (currentSection === "metricas") sectionHtml = renderMetricas(unit);
 
   content.classList.toggle("main--full", currentSection === "calendario");
@@ -1107,6 +1293,7 @@ function setSection(section) {
   currentContentFilter = "todos";
   guionState = { generating: false, result: null, error: null, topic: "" };
   guionExpandedId = null;
+  carruselState = { generating: false, error: null, topic: "", slides: null, style: carruselState.style };
   closeDayPanel();
   const unit = UNITS.find((u) => u.id === currentUnitId);
   if (unit) renderUnit(unit);
@@ -1122,6 +1309,7 @@ function setActiveTab(unitId) {
   currentSection = "resumen";
   guionState = { generating: false, result: null, error: null, topic: "" };
   guionExpandedId = null;
+  carruselState = { generating: false, error: null, topic: "", slides: null, style: carruselState.style };
   closeDayPanel();
   const unit = UNITS.find((u) => u.id === unitId);
   if (unit) {
@@ -1229,12 +1417,38 @@ function initContentEvents() {
       guionExpandedId = guionExpandedId === id ? null : id;
       const unit = UNITS.find((u) => u.id === currentUnitId);
       if (unit) renderUnit(unit);
+      return;
+    }
+    if (e.target.id === "carrusel-generate-btn") {
+      const unit = UNITS.find((u) => u.id === currentUnitId);
+      if (unit) handleGenerateCarrusel(unit);
+      return;
+    }
+    const styleBtn = e.target.closest("[data-carrusel-style]");
+    if (styleBtn) {
+      carruselState.style = styleBtn.dataset.carruselStyle;
+      const unit = UNITS.find((u) => u.id === currentUnitId);
+      if (unit) renderUnit(unit);
+      return;
+    }
+    if (e.target.id === "carrusel-download-btn") {
+      handleDownloadCarrusel();
     }
   });
 
   document.getElementById("content").addEventListener("input", (e) => {
     if (e.target.id === "guion-topic-input") {
       guionState.topic = e.target.value;
+      return;
+    }
+    if (e.target.id === "carrusel-topic-input") {
+      carruselState.topic = e.target.value;
+      return;
+    }
+    const slideField = e.target.closest("[data-slide-field]");
+    if (slideField && carruselState.slides) {
+      const slide = carruselState.slides.find((s) => s.id === slideField.dataset.slideId);
+      if (slide) slide[slideField.dataset.slideField] = e.target.textContent;
     }
   });
 }
